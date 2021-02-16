@@ -1,7 +1,5 @@
 const LINE_LENGTH = 50;
 
-const LINE_WIDTH = 4;
-
 //NESW
 const NESW = 0b1111; //[1,1,1,1];
 const NES = 0b1110; //[1,1,1,0];
@@ -9,6 +7,7 @@ const NSW = 0b1011; //[1,0,1,1];
 const NEW = 0b1101; //[1,1,0,1];
 const ESW = 0b0111; //[0,1,1,1];
 const ES = 0b0110; //[0,1,1,0];
+const EW = 0b0110; //[0,1,0,1];
 const NE = 0b1100; //[1,1,0,0];
 const NS = 0b1010; //[1,0,1,0];
 const NW = 0b1001; //[1,0,0,1];
@@ -18,6 +17,8 @@ const E = 0b0100; //[0,1,0,0];
 const S = 0b0010; //[0,0,1,0];
 const W = 0b0001; //[0,0,0,1];
 const EMPTY = 0b0000; //[0,0,0,0];
+
+const INTERSECTIONS = [NE, ES, SW, NW];
 
 //directions that can be taken for the next move
 const DIRECTIONS = [
@@ -46,18 +47,26 @@ let solutionIndex = -1;
 
 let selectedIndex = -1;
 
-$(function() {
-  $("#next").hide();
+$(document).ready(function () {
+  let canvas_width = MAP[0].length * LINE_LENGTH;
+
+  let canvas_height = MAP.length * LINE_LENGTH;
 
   let ctx = $("#myCanvas").get(0).getContext("2d");
 
-  ctx.fillStyle = "#000000";
+  $("#next").hide();
+
+  $("#myCanvas").attr("width", canvas_width + "px");
+
+  $("#myCanvas").attr("height", canvas_height + "px");
 
   drawGrid(ctx);
 
   move(START_NODE, 0, []);
 
   console.log("done");
+
+  solutions.sort((a, b) => a.length - b.length);
 
   $.each(solutions, function (index, value) {
     $("#solutions").append(
@@ -68,13 +77,13 @@ $(function() {
   });
 
   $("#solutions").on("change", function (event) {
-    ctx.clearRect(0, 0, 350, 300);
+    ctx.clearRect(0, 0, canvas_width, canvas_height);
 
     drawGrid(ctx);
 
-	selectedIndex = this.value;
+    selectedIndex = this.value;
 
-	solutionIndex = 0;
+    solutionIndex = 0;
 
     markNode(ctx, solutions[selectedIndex][solutionIndex]);
 
@@ -82,45 +91,44 @@ $(function() {
   });
 
   $("#next").on("click", function (event) {
-	  if( solutionIndex == solutions[selectedIndex].length - 1 ) {
-		$("#next").hide();
+    if (solutionIndex == solutions[selectedIndex].length - 1) {
+      $("#next").hide();
 
-		markEnd(ctx);
-	  }
-	  	
-	  else {
-		  solutionIndex++;
+      markEnd(ctx);
+    } else {
+      solutionIndex++;
 
-		  markNode(ctx, solutions[selectedIndex][solutionIndex]);
-	  }
-
+      markNode(ctx, solutions[selectedIndex][solutionIndex]);
+    }
   });
 });
 
 function move(current, moves, trail) {
-  //console.log( 'position - x: ' + current.x + ', y: ' + current.y + ', from: ' + current.arrivedFrom + ', moves: ' + moves );
+  let potential_nodes = [];
 
+  let current_position_bitmask = MAP[current.y][current.x];
+
+  //add the current node to the history
   trail.push(current);
-
-  let path_bitmask = MAP[current.y][current.x];
-
-  //remove the arrival path as a candidate path, by it bitmask
-  if (current.arrivedFrom != null && (path_bitmask & current.arrivedFrom) > 0)
-    path_bitmask &= ~current.arrivedFrom;
 
   //convert the remaining bitmask into an array of directions
   let potential_directions = DIRECTIONS.filter(
-    (direction) => (direction.path & path_bitmask) > 0
+    (direction) => (direction.path & current_position_bitmask) > 0
   );
 
-  let potential_nodes = [];
-
-  //create a list of nodes that can be moved to
+  //loop through the potential directions and create a list of destination nodes
   potential_directions.forEach((direction) =>
     potential_nodes.push(applyDirection(current, direction))
   );
 
-  //remove nodes that have been previously visted
+  //if an intersection exists filter out the straight though option otherwise
+  //allow passing stright through
+  if (hasIntersection(MAP[current.y][current.x]))
+    potential_nodes = potential_nodes.filter(
+      (node) => (node.arrivedFrom & current.arrivedFrom) == 0
+    );
+
+  //remove nodes that have been previously visted, i.e. you can't go back
   potential_nodes = potential_nodes.filter(
     (node) =>
       trail.filter(
@@ -130,32 +138,29 @@ function move(current, moves, trail) {
 
   moves++;
 
-  //recursively move to the next node
+  //recursively move to the next node if available, otherwise report a dead end
   if (potential_nodes.length > 0)
     potential_nodes.forEach((next_node) => {
+      //if end is in sight, then report path completed
       if (next_node.x == END_NODE.x && next_node.y == END_NODE.y) {
         console.log("found dest in " + moves + " moves");
 
         solutions.push(trail);
-      } else move(next_node, moves, trail.slice(0, moves)); //set the trail back to
+      }
+      //otherwise keep moving, but we need to reset our trail
+      else move(next_node, moves, trail.slice(0, moves));
     });
-  //else {
-  //	console.log('dead end reached after ' + moves + ' moves' );
-  //}
-}
-
-function applyDirection(current, direction) {
-  return {
-    x: current.x + direction.x,
-    y: current.y + direction.y,
-    arrivedFrom: direction.path,
-  };
+  else {
+    console.log("dead end reached after " + moves + " moves");
+  }
 }
 
 function drawGrid(ctx) {
+  ctx.fillStyle = "#000000";
+
   for (let y = 0; y < MAP.length; y++) {
     for (let x = 0; x < MAP[y].length; x++) {
-      drawNode(ctx, { x: x, y: y }, MAP[y][x]);
+      drawNode(ctx, { x: x, y: y }, MAP[y][x], 1);
     }
   }
 }
@@ -175,65 +180,91 @@ function markNode(ctx, point) {
   ctx.fillStyle = "green";
 
   ctx.fill();
+
+  drawNode(
+    ctx,
+    { x: point.x, y: point.y },
+    oppositeDirection(point.arrivedFrom),
+    5
+  );
 }
 
-function markEnd(ctx, point) {
-	ctx.beginPath();
-  
-	ctx.arc(
-	  25 + END_NODE.x * LINE_LENGTH,
-	  25 + END_NODE.y * LINE_LENGTH,
-	  10,
-	  0,
-	  2 * Math.PI,
-	  false
-	);
-  
-	ctx.fillStyle = "red";
-  
-	ctx.fill();
-  }
+function markEnd(ctx) {
+  ctx.beginPath();
 
-function drawNode(ctx, coords, node) {
-  if ((node & N) == N) draw(ctx, coords, "north");
-  if ((node & E) == E) draw(ctx, coords, "east");
-  if ((node & S) == S) draw(ctx, coords, "south");
-  if ((node & W) == W) draw(ctx, coords, "west");
+  ctx.arc(
+    25 + END_NODE.x * LINE_LENGTH,
+    25 + END_NODE.y * LINE_LENGTH,
+    10,
+    0,
+    2 * Math.PI,
+    false
+  );
+
+  ctx.fillStyle = "red";
+
+  ctx.fill();
 }
 
-function draw(ctx, coords, type) {
+function drawNode(ctx, coords, nodes, width) {
+  //draw lines in the appropriate directions for each node
+  DIRECTIONS.forEach((direction) => {
+    if ((nodes & direction.path) == direction.path)
+      draw(ctx, coords, direction.path, width);
+  });
+}
+
+function draw(ctx, coords, type, line_width) {
   let centre = {
     x: coords.x * LINE_LENGTH + LINE_LENGTH / 2,
     y: coords.y * LINE_LENGTH + LINE_LENGTH / 2,
   };
 
+  let width_offset = line_width > 2 ? line_width / 2 : 0;
+
   switch (type) {
-    case "north":
-      ctx.fillRect(centre.x, centre.y, 1, LINE_LENGTH / -2);
+    case N:
+      dims = { w: line_width, h: LINE_LENGTH / -2 };
       break;
 
-    case "east":
-      ctx.fillRect(centre.x, centre.y, LINE_LENGTH / 2, 1);
+    case E:
+      dims = { w: LINE_LENGTH / 2, h: line_width };
       break;
 
-    case "south":
-      ctx.fillRect(centre.x, centre.y, 1, LINE_LENGTH / 2);
+    case S:
+      dims = { w: line_width, h: LINE_LENGTH / 2 };
       break;
 
-    case "west":
-      ctx.fillRect(centre.x, centre.y, LINE_LENGTH / -2, 1);
+    case W:
+      dims = { w: LINE_LENGTH / -2, h: line_width };
       break;
   }
+
+  ctx.fillRect(
+    centre.x - width_offset,
+    centre.y - width_offset,
+    dims.w,
+    dims.h
+  );
 }
 
 //https://stackoverflow.com/questions/43122082/efficiently-count-the-number-of-bits-in-an-integer-in-javascript/43122214
+//not used
 function countSetBits(n) {
   n = n - ((n >> 1) & 0x55555555);
   n = (n & 0x33333333) + ((n >> 2) & 0x33333333);
   return (((n + (n >> 4)) & 0xf0f0f0f) * 0x1010101) >> 24;
 }
 
-//to get the opposite direction shift bit over by 2 to the right (for noth and east) or the left (for south and west)
+function applyDirection(current, direction) {
+  return {
+    x: current.x + direction.x,
+    y: current.y + direction.y,
+    arrivedFrom: direction.path,
+  };
+}
+
+//to get the opposite direction shift bit over by 2 to the right (for north and east) or the left (for south and west)
 function oppositeDirection(value) {
   switch (value) {
     case N:
@@ -244,4 +275,18 @@ function oppositeDirection(value) {
     case W:
       return value << 2;
   }
+}
+
+function hasIntersection(map_position) {
+  let has_intersection = false;
+
+  INTERSECTIONS.forEach((value) => {
+    if ((map_position & value) == value) {
+      has_intersection = true;
+
+      return; //stop looping after first success
+    }
+  });
+
+  return has_intersection;
 }
